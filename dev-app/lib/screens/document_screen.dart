@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path/path.dart' as p;
 
 import '../models/studio_doc.dart';
 import '../services/native.dart';
@@ -163,19 +162,14 @@ class _DocumentScreenState extends State<DocumentScreen> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      final out = Storage.uniqueSaved(doc.name);
-      final file = await NativeBridge.exportPdf(doc, out);
-      String? dl;
-      String? dlError;
-      try {
-        dl = await NativeBridge.saveToDownloads(file);
-      } catch (e) {
-        dlError = '$e';
-      }
+      final existing = {for (final f in await NativeBridge.listSaved()) f.name.toLowerCase()};
+      final name = Storage.uniqueName(doc.name, existing);
+      final file = await NativeBridge.exportPdf(doc, Storage.outFile(name));
+      final dl = await NativeBridge.saveToDownloads(file, name: name);
       doc.dirty = false;
       if (!mounted) return;
       setState(() => _saving = false);
-      await _savedSheet(file, dl, dlError);
+      await _savedSheet(file, dl);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -190,7 +184,7 @@ class _DocumentScreenState extends State<DocumentScreen> {
     }
   }
 
-  Future<void> _savedSheet(File file, String? dl, String? dlError) async {
+  Future<void> _savedSheet(File file, String dl) async {
     final kb = file.lengthSync() / 1024;
     final size = kb > 1024 ? '${(kb / 1024).toStringAsFixed(1)} MB' : '${kb.round()} KB';
     await showModalBottomSheet(
@@ -208,8 +202,8 @@ class _DocumentScreenState extends State<DocumentScreen> {
                   textAlign: TextAlign.center, style: Theme.of(c).textTheme.titleLarge),
               const SizedBox(height: 6),
               Text(
-                '${p.basename(file.path)} · ${doc.pages.length} Seite(n) · $size\n'
-                '${dl != null ? 'Im Ordner „Download/PDF-Studio“' : 'Nur in der App (Downloads: $dlError)'}',
+                '$dl · ${doc.pages.length} Seite(n) · $size\n'
+                'Im Ordner „Download/PDF-Studio“',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 18),

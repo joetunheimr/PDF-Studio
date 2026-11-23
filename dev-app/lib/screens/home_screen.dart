@@ -19,15 +19,16 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  List<File> _recent = [];
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  List<SavedPdf> _recent = [];
   StreamSubscription<List<String>>? _sub;
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    _reload();
+    WidgetsBinding.instance.addObserver(this);
+    _migrate().whenComplete(_reload);
     _sub = NativeBridge.incoming.stream.listen(_openIncoming);
     NativeBridge.takeInitialPdfs().then((l) {
       if (l.isNotEmpty) _openIncoming(l);
@@ -36,11 +37,49 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     super.dispose();
   }
 
-  void _reload() => setState(() => _recent = Storage.savedFiles());
+  /// Die Liste ist immer der aktuelle Inhalt von „Download/PDF-Studio“.
+  Future<void> _reload() async {
+    try {
+      final l = await NativeBridge.listSaved();
+      if (mounted) setState(() => _recent = l);
+    } catch (_) {}
+  }
+
+  // Zurück in die App (z. B. nach dem Dateimanager): Liste neu lesen.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _reload();
+  }
+
+  /// Bis 1.0.2 lag die Liste in einem App-internen Ordner: fehlende Dateien einmalig
+  /// nach „Download/PDF-Studio“ übernehmen, dann den Altbestand entfernen.
+  Future<void> _migrate() async {
+    final old = Storage.legacySaved();
+    if (old.isEmpty) return;
+    try {
+      final names = {for (final f in await NativeBridge.listSaved()) f.name.toLowerCase()};
+      for (final f in old) {
+        try {
+          final n = p.basename(f.path);
+          if (!names.contains(n.toLowerCase())) await NativeBridge.saveToDownloads(f, name: n);
+          f.deleteSync();
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _openSaved(SavedPdf f) => _guard(() async {
+        final copy = await NativeBridge.copySaved(f, Storage.newWorkPath('pdf'));
+        if (!mounted) return;
+        final r = await Flows.importPaths(context, [copy.path], names: [f.name]);
+        if (r == null || !mounted) return;
+        await _openDoc(StudioDoc(name: Storage.safeName(r.$2 ?? 'Dokument'), pages: r.$1));
+      });
 
   Future<void> _openDoc(StudioDoc doc) async {
     await DocumentScreen.open(context, doc);
@@ -180,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 26),
                   Row(
                     children: [
-                      Text('Zuletzt gespeichert',
+                      Text('Gespeicherte PDFs',
                           style: Theme.of(context)
                               .textTheme
                               .titleMedium
@@ -210,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Icon(Icons.inventory_2_outlined, size: 36, color: scheme.outline),
                       const SizedBox(height: 8),
-                      Text('Noch nichts gespeichert.\nGespeicherte PDFs erscheinen hier und im Ordner „Download/PDF-Studio“.',
+                      Text('Noch nichts gespeichert.\nHier steht, was im Ordner „Download/PDF-Studio“ liegt.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: scheme.onSurfaceVariant)),
                     ],
@@ -226,12 +265,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (_, i) => _RecentTile(
                   file: _recent[i],
-                  onOpen: () => _guard(() async {
-                    final r = await Flows.importPaths(context, [_recent[i].path],
-                        names: [p.basename(_recent[i].path)]);
-                    if (r == null || !mounted) return;
-                    await _openDoc(StudioDoc(name: Storage.safeName(r.$2 ?? 'Dokument'), pages: r.$1));
-                  }),
+                  all: _recent,
+                  onOpen: () => _openSaved(_recent[i]),
                   onChanged: _reload,
                 ),
               ),
@@ -413,18 +448,83 @@ class _SmallAction extends StatelessWidget {
 }
 
 class _RecentTile extends StatelessWidget {
-  const _RecentTile({required this.file, required this.onOpen, required this.onChanged});
-  final File file;
+  const _RecentTile({required this.file, required this.all, required this.onOpen, required this.onChanged});
+  final SavedPdf file;
+  final List<SavedPdf> all;
   final VoidCallback onOpen;
   final VoidCallback onChanged;
+
+  void _snack(BuildContext context, String s) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  }
+
+  /// Kopie mit echtem Namen zum Anzeigen oder Teilen.
+  Future<File> _copy() => NativeBridge.copySaved(file, Storage.outFile(file.name).path);
+
+  Future<void> _rename(BuildContext context) async {
+    final ctl = TextEditingController(text: p.basenameWithoutExtension(file.name));
+    ctl.selection = TextSelection(baseOffset: 0, extentOffset: ctl.text.length);
+    final r = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Umbenennen'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          decoration: const InputDecoration(suffixText: '.pdf'),
+          onSubmitted: (v) => Navigator.pop(c, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Abbrechen')),
+          FilledButton(onPressed: () => Navigator.pop(c, ctl.text), child: const Text('OK')),
+        ],
+      ),
+    );
+    if (r == null || r.trim().isEmpty || !context.mounted) return;
+    final name = '${Storage.safeName(r)}.pdf';
+    if (name == file.name) return;
+    final taken = all.any((f) => f.id != file.id && f.name.toLowerCase() == name.toLowerCase());
+    if (taken) {
+      _snack(context, '„$name“ gibt es im Ordner schon.');
+      return;
+    }
+    try {
+      await NativeBridge.renameSaved(file, name);
+    } catch (e) {
+      if (context.mounted) _snack(context, 'Umbenennen fehlgeschlagen: $e');
+    }
+    onChanged();
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('PDF löschen?'),
+        content: Text('„${file.name}“ wird aus dem Ordner „Download/PDF-Studio“ gelöscht. '
+            'Das lässt sich nicht rückgängig machen.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Abbrechen')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Löschen')),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await NativeBridge.deleteSaved(file);
+    } catch (e) {
+      if (context.mounted) _snack(context, 'Löschen fehlgeschlagen: $e');
+    }
+    onChanged();
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final st = file.statSync();
-    final d = st.modified;
+    final d = file.modified;
     String two(int v) => v.toString().padLeft(2, '0');
-    final kb = st.size / 1024;
+    final kb = file.size / 1024;
     final size = kb > 1024 ? '${(kb / 1024).toStringAsFixed(1)} MB' : '${kb.round()} KB';
     return Card(
       child: ListTile(
@@ -439,43 +539,38 @@ class _RecentTile extends StatelessWidget {
           ),
           child: Icon(Icons.description_outlined, color: scheme.primary),
         ),
-        title: Text(p.basenameWithoutExtension(file.path),
+        title: Text(p.basenameWithoutExtension(file.name),
             maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: Text('${two(d.day)}.${two(d.month)}.${d.year}, ${two(d.hour)}:${two(d.minute)} · $size'),
         onTap: onOpen,
         trailing: PopupMenuButton<String>(
           onSelected: (v) async {
-            switch (v) {
-              case 'share':
-                await NativeBridge.share(file);
-              case 'view':
-                await NativeBridge.openExternal(file);
-              case 'edit':
-                onOpen();
-              case 'del':
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (c) => AlertDialog(
-                    title: const Text('Aus der Liste löschen?'),
-                    content: const Text(
-                        'Die Kopie in der App wird entfernt. Die Datei im Ordner „Download/PDF-Studio“ bleibt erhalten.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Abbrechen')),
-                      FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Löschen')),
-                    ],
-                  ),
-                );
-                if (ok == true) {
-                  file.deleteSync();
-                  onChanged();
-                }
+            try {
+              switch (v) {
+                case 'share':
+                  await NativeBridge.share(await _copy());
+                case 'view':
+                  final ok = await NativeBridge.openExternal(await _copy());
+                  if (!ok && context.mounted) _snack(context, 'Keine App zum Anzeigen gefunden');
+                case 'edit':
+                  onOpen();
+                case 'ren':
+                  await _rename(context);
+                case 'del':
+                  await _delete(context);
+              }
+            } catch (e) {
+              // z. B. im Dateimanager gelöscht, während die Liste offen war
+              if (context.mounted) _snack(context, 'Datei nicht lesbar: $e');
+              onChanged();
             }
           },
           itemBuilder: (_) => const [
             PopupMenuItem(value: 'edit', child: Text('Bearbeiten')),
             PopupMenuItem(value: 'view', child: Text('Anzeigen')),
             PopupMenuItem(value: 'share', child: Text('Teilen')),
+            PopupMenuItem(value: 'ren', child: Text('Umbenennen')),
             PopupMenuItem(value: 'del', child: Text('Löschen')),
           ],
         ),

@@ -1,5 +1,7 @@
 package de.w3dk.pdf_studio
 
+import android.app.RecoverableSecurityException
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
@@ -39,6 +41,8 @@ import java.util.concurrent.Executors
  * Nativer Teil von PDF-Studio:
  *  - export: baut das PDF mit PDFBox (Original-Seiten bleiben Vektor/Text)
  *  - saveToDownloads: Kopie nach Download/PDF-Studio (MediaStore)
+ *  - listSaved / copySaved / renameSaved / deleteSaved: Liste der Startseite = Inhalt von
+ *    Download/PDF-Studio (nur Dateien, die diese App angelegt hat – so will es Android)
  *  - openExternal: PDF in einer Anzeige-App öffnen
  *  - takeIncoming / "incoming": per „Öffnen mit“ oder „Teilen“ empfangene PDFs
  *  - pdfInfo / pdfRender / pdfClose: Anzeige mit dem eingebauten Android-PdfRenderer
@@ -154,6 +158,24 @@ class MainActivity : FlutterActivity() {
                         if (path == null) closeAllRenderers() else closeRenderer(path)
                     }
                     result.success(null)
+                }
+                "listSaved" -> io(result) { listSaved() }
+                "copySaved" -> {
+                    val id = call.argument<Number>("id")?.toLong()
+                    val dest = call.argument<String>("dest")
+                    if (id == null || dest == null) return@setMethodCallHandler result.error("bad_args", "id/dest fehlt", null)
+                    io(result) { copySaved(id, File(dest)); dest }
+                }
+                "renameSaved" -> {
+                    val id = call.argument<Number>("id")?.toLong()
+                    val name = call.argument<String>("name")
+                    if (id == null || name == null) return@setMethodCallHandler result.error("bad_args", "id/name fehlt", null)
+                    io(result) { renameSaved(id, name) }
+                }
+                "deleteSaved" -> {
+                    val id = call.argument<Number>("id")?.toLong()
+                    if (id == null) return@setMethodCallHandler result.error("bad_args", "id fehlt", null)
+                    io(result) { deleteSaved(id) }
                 }
                 "openExternal" -> {
                     val path = call.argument<String>("path")
@@ -412,8 +434,70 @@ class MainActivity : FlutterActivity() {
             resolver.delete(uri, null, null)
             throw e
         }
-        return "Download/PDF-Studio/$name"
+        return displayName(uri) ?: name
     }
+
+    // ------------------------------------------------------------------ Download/PDF-Studio
+
+    private val savedRelPath get() = Environment.DIRECTORY_DOWNLOADS + "/PDF-Studio/"
+
+    private fun savedUri(id: Long): Uri = ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+
+    /** Läuft auf dem IO-Thread, Ergebnis/Fehler zurück auf den UI-Thread. */
+    private fun io(result: MethodChannel.Result, block: () -> Any?) {
+        executor.execute {
+            try {
+                val r = block()
+                runOnUiThread { result.success(r) }
+            } catch (e: RecoverableSecurityException) {
+                runOnUiThread { result.error("denied", "Diese Datei wurde nicht von PDF-Studio angelegt.", null) }
+            } catch (e: Throwable) {
+                runOnUiThread { result.error("io_failed", e.message ?: e.toString(), null) }
+            }
+        }
+    }
+
+    /** PDFs in Download/PDF-Studio, neueste zuerst: [{id, name, size, modified(ms)}]. */
+    private fun listSaved(): List<Map<String, Any>> {
+        val out = mutableListOf<Map<String, Any>>()
+        val proj = arrayOf(
+            MediaStore.Downloads._ID, MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_MODIFIED,
+        )
+        val sel = "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND ${MediaStore.MediaColumns.IS_PENDING}=0"
+        contentResolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI, proj, sel, arrayOf(savedRelPath),
+            "${MediaStore.MediaColumns.DATE_MODIFIED} DESC",
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val name = c.getString(1) ?: continue
+                if (!name.endsWith(".pdf", ignoreCase = true)) continue
+                out.add(mapOf(
+                    "id" to c.getLong(0), "name" to name,
+                    "size" to (if (c.isNull(2)) 0L else c.getLong(2)),
+                    "modified" to (if (c.isNull(3)) 0L else c.getLong(3) * 1000L),
+                ))
+            }
+        }
+        return out
+    }
+
+    private fun copySaved(id: Long, dest: File) {
+        dest.parentFile?.mkdirs()
+        contentResolver.openInputStream(savedUri(id))?.use { input ->
+            dest.outputStream().use { input.copyTo(it) }
+        } ?: throw IllegalStateException("Datei nicht lesbar")
+    }
+
+    /** Liefert den tatsächlich vergebenen Namen. */
+    private fun renameSaved(id: Long, name: String): String {
+        val uri = savedUri(id)
+        val v = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, name) }
+        if (contentResolver.update(uri, v, null, null) < 1) throw IllegalStateException("Umbenennen nicht möglich")
+        return displayName(uri) ?: name
+    }
+
+    private fun deleteSaved(id: Long): Boolean = contentResolver.delete(savedUri(id), null, null) > 0
 
     private fun openExternal(file: File): Boolean {
         return try {

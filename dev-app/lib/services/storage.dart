@@ -6,14 +6,15 @@ import 'package:path_provider/path_provider.dart';
 
 /// Ordner der App:
 ///   work/        Kopien importierter PDFs und gescannter Seiten
-///   saved/       gespeicherte Ergebnisse (Liste „Zuletzt gespeichert“)
+///   work/out/    Kopien zum Anzeigen/Teilen (mit echtem Dateinamen)
+///   saved/       nur noch Altbestand bis 1.0.2; wird nach Download/PDF-Studio übernommen
 ///   signatures/  gespeicherte Unterschriften (PNG)
 class Storage {
   static late Directory _root;
 
   static Future<void> init() async {
     _root = await getApplicationDocumentsDirectory();
-    for (final d in [work, saved, signatures]) {
+    for (final d in [work, signatures]) {
       if (!d.existsSync()) d.createSync(recursive: true);
     }
   }
@@ -39,26 +40,38 @@ class Storage {
     return dest;
   }
 
-  /// Gespeicherte PDFs, neueste zuerst.
-  static List<File> savedFiles() {
-    final files = saved
+  /// Altbestand (bis 1.0.2 lag die Liste der Startseite in saved/).
+  static List<File> legacySaved() {
+    if (!saved.existsSync()) return const [];
+    return saved
         .listSync()
         .whereType<File>()
         .where((f) => f.path.toLowerCase().endsWith('.pdf'))
         .toList();
-    files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
-    return files;
   }
 
-  static File uniqueSaved(String baseName) {
+  /// Datei mit echtem Namen in work/out; ältere Kopien (> 1 h) werden dabei aufgeräumt.
+  static File outFile(String name) {
+    final dir = Directory(p.join(work.path, 'out'));
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    try {
+      for (final e in dir.listSync()) {
+        if (e is File && DateTime.now().difference(e.lastModifiedSync()).inHours >= 1) e.deleteSync();
+      }
+    } catch (_) {}
+    return File(p.join(dir.path, name));
+  }
+
+  /// „Name.pdf“, ggf. „Name (2).pdf“ …, das in [existing] (klein geschrieben) noch nicht vorkommt.
+  static String uniqueName(String baseName, Set<String> existing) {
     final base = safeName(baseName);
-    var f = File(p.join(saved.path, '$base.pdf'));
+    var n = '$base.pdf';
     var i = 2;
-    while (f.existsSync()) {
-      f = File(p.join(saved.path, '$base ($i).pdf'));
+    while (existing.contains(n.toLowerCase())) {
+      n = '$base ($i).pdf';
       i++;
     }
-    return f;
+    return n;
   }
 
   static List<File> signatureFiles() {

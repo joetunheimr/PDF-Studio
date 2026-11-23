@@ -116,13 +116,54 @@ class NativeBridge {
     }
   }
 
-  /// Kopie in „Download/PDF-Studio“. Liefert den sichtbaren Pfad.
-  static Future<String?> saveToDownloads(File file) async {
+  /// Kopie in „Download/PDF-Studio“ unter [name]. Liefert den tatsächlich vergebenen Namen.
+  static Future<String> saveToDownloads(File file, {String? name}) async {
     try {
-      return await _ch.invokeMethod<String>('saveToDownloads', {
+      final r = await _ch.invokeMethod<String>('saveToDownloads', {
         'path': file.path,
-        'name': p.basename(file.path),
+        'name': name ?? p.basename(file.path),
       });
+      return r ?? name ?? p.basename(file.path);
+    } on PlatformException catch (e) {
+      throw StateError(e.message ?? e.code);
+    }
+  }
+
+  /// Inhalt von „Download/PDF-Studio“, neueste zuerst.
+  static Future<List<SavedPdf>> listSaved() async {
+    final r = await _ch.invokeListMethod<Map<dynamic, dynamic>>('listSaved') ?? const [];
+    return [
+      for (final m in r)
+        SavedPdf(
+          id: (m['id'] as num).toInt(),
+          name: m['name'] as String,
+          size: (m['size'] as num).toInt(),
+          modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num).toInt()),
+        ),
+    ];
+  }
+
+  /// Kopiert die Datei aus dem Ordner nach [dest] (zum Bearbeiten, Anzeigen, Teilen).
+  static Future<File> copySaved(SavedPdf f, String dest) async {
+    try {
+      await _ch.invokeMethod('copySaved', {'id': f.id, 'dest': dest});
+      return File(dest);
+    } on PlatformException catch (e) {
+      throw StateError(e.message ?? e.code);
+    }
+  }
+
+  static Future<String> renameSaved(SavedPdf f, String name) async {
+    try {
+      return await _ch.invokeMethod<String>('renameSaved', {'id': f.id, 'name': name}) ?? name;
+    } on PlatformException catch (e) {
+      throw StateError(e.message ?? e.code);
+    }
+  }
+
+  static Future<bool> deleteSaved(SavedPdf f) async {
+    try {
+      return await _ch.invokeMethod<bool>('deleteSaved', {'id': f.id}) ?? false;
     } on PlatformException catch (e) {
       throw StateError(e.message ?? e.code);
     }
@@ -144,4 +185,13 @@ class NativeBridge {
       return false;
     }
   }
+}
+
+/// Eine Datei in „Download/PDF-Studio“ (MediaStore-Eintrag).
+class SavedPdf {
+  const SavedPdf({required this.id, required this.name, required this.size, required this.modified});
+  final int id;
+  final String name;
+  final int size;
+  final DateTime modified;
 }
