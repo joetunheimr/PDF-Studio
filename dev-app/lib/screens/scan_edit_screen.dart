@@ -71,10 +71,9 @@ class ScanEditScreen extends StatefulWidget {
   const ScanEditScreen({super.key, required this.paths});
   final List<String> paths;
 
-  static Future<List<PageItem>?> open(BuildContext context, List<String> paths) =>
-      Navigator.of(context).push<List<PageItem>>(
-        MaterialPageRoute(builder: (_) => ScanEditScreen(paths: paths)),
-      );
+  static Future<List<PageItem>?> open(BuildContext context, List<String> paths) => Navigator.of(
+    context,
+  ).push<List<PageItem>>(MaterialPageRoute(builder: (_) => ScanEditScreen(paths: paths)));
 
   @override
   State<ScanEditScreen> createState() => _ScanEditScreenState();
@@ -128,9 +127,9 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
       if (identical(s, _cur) && !_cropMode) _refresh();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Foto konnte nicht geladen werden: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Foto konnte nicht geladen werden: $e')));
       }
     }
   }
@@ -202,9 +201,9 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
       s.brightness = c.brightness;
       s.contrast = c.contrast;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Filter für alle ${_shots.length} Seiten übernommen')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Filter für alle ${_shots.length} Seiten übernommen')));
   }
 
   Future<void> _finish() async {
@@ -252,9 +251,7 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Fehler beim Erstellen: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Fehler beim Erstellen: $e')));
       }
       return;
     }
@@ -319,36 +316,36 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
             child: s.previewImage == null
                 ? const Center(child: CircularProgressIndicator(color: Colors.white))
                 : _cropMode
-                    ? Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: CornerEditor(
-                          key: ValueKey(s.path),
-                          image: s.previewImage!,
-                          corners: s.corners,
-                          onChanged: (c) => setState(() => s.corners = c),
-                        ),
-                      )
-                    : Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Center(
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              if (s.result != null)
-                                DecoratedBox(
-                                  decoration: BoxDecoration(boxShadow: [
-                                    BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.5),
-                                        blurRadius: 20),
-                                  ]),
-                                  child: RawImage(image: s.result, fit: BoxFit.contain),
-                                ),
-                              if (_processing && s.result == null)
-                                const CircularProgressIndicator(color: Colors.white),
-                            ],
-                          ),
-                        ),
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: CornerEditor(
+                      key: ValueKey(s.path),
+                      image: s.previewImage!,
+                      corners: s.corners,
+                      onChanged: (c) => setState(() => s.corners = c),
+                    ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Center(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          if (s.result != null)
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                boxShadow: [
+                                  BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 20),
+                                ],
+                              ),
+                              child: RawImage(image: s.result, fit: BoxFit.contain),
+                            ),
+                          if (_processing && s.result == null)
+                            const CircularProgressIndicator(color: Colors.white),
+                        ],
                       ),
+                    ),
+                  ),
           ),
           if (s.previewImage != null) (_cropMode ? _cropTools(s) : _filterTools(s, scheme)),
           if (_shots.length > 1) _strip(),
@@ -360,11 +357,11 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
 
   Widget _cropTools(_Shot s) {
     Widget btn(IconData i, String l, VoidCallback f) => TextButton.icon(
-          style: TextButton.styleFrom(foregroundColor: Colors.white),
-          onPressed: f,
-          icon: Icon(i, size: 20),
-          label: Text(l),
-        );
+      style: TextButton.styleFrom(foregroundColor: Colors.white),
+      onPressed: f,
+      icon: Icon(i, size: 20),
+      label: Text(l),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Wrap(
@@ -376,8 +373,9 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
             if (!mounted) return;
             setState(() => s.corners = f ?? List.of(defaultCorners));
             if (f == null) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Kein Dokumentrand erkannt – bitte Ecken ziehen.')));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Kein Dokumentrand erkannt – bitte Ecken ziehen.')),
+              );
             }
           }),
           btn(Icons.fullscreen, 'Ganzes Bild', () => setState(() => s.corners = List.of(fullCorners))),
@@ -403,15 +401,12 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: ChoiceChip(
                       label: Text(f.label),
-                      avatar: Icon(
-                        switch (f) {
-                          ScanFilter.original => Icons.image_outlined,
-                          ScanFilter.enhanced => Icons.auto_awesome,
-                          ScanFilter.gray => Icons.gradient,
-                          ScanFilter.bw => Icons.contrast,
-                        },
-                        size: 18,
-                      ),
+                      avatar: Icon(switch (f) {
+                        ScanFilter.original => Icons.image_outlined,
+                        ScanFilter.enhanced => Icons.auto_awesome,
+                        ScanFilter.gray => Icons.gradient,
+                        ScanFilter.bw => Icons.contrast,
+                      }, size: 18),
                       selected: s.filter == f,
                       onSelected: (_) {
                         setState(() => s.filter = f);
@@ -525,8 +520,7 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
               width: 48,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: sel ? StudioColors.coral : Colors.white24, width: sel ? 3 : 1),
+                border: Border.all(color: sel ? StudioColors.coral : Colors.white24, width: sel ? 3 : 1),
                 image: DecorationImage(
                   image: ResizeImage(FileImage(File(_shots[i].path)), width: 120),
                   fit: BoxFit.cover,
@@ -537,8 +531,7 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
                 margin: const EdgeInsets.all(2),
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 color: Colors.black54,
-                child: Text('${i + 1}',
-                    style: const TextStyle(color: Colors.white, fontSize: 11)),
+                child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 11)),
               ),
             ),
           );
@@ -550,12 +543,7 @@ class _ScanEditScreenState extends State<ScanEditScreen> {
 
 /// Bild mit vier verschiebbaren Ecken (und Kantenmitten) samt Lupe.
 class CornerEditor extends StatefulWidget {
-  const CornerEditor({
-    super.key,
-    required this.image,
-    required this.corners,
-    required this.onChanged,
-  });
+  const CornerEditor({super.key, required this.image, required this.corners, required this.onChanged});
 
   final ui.Image image;
   final List<double> corners;
@@ -572,109 +560,110 @@ class _CornerEditorState extends State<CornerEditor> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, c) {
-      final iw = widget.image.width.toDouble(), ih = widget.image.height.toDouble();
-      final s = (c.maxWidth / iw) < (c.maxHeight / ih) ? c.maxWidth / iw : c.maxHeight / ih;
-      final w = iw * s, h = ih * s;
-      final ox = (c.maxWidth - w) / 2, oy = (c.maxHeight - h) / 2;
-      final rect = Rect.fromLTWH(ox, oy, w, h);
+    return LayoutBuilder(
+      builder: (context, c) {
+        final iw = widget.image.width.toDouble(), ih = widget.image.height.toDouble();
+        final s = (c.maxWidth / iw) < (c.maxHeight / ih) ? c.maxWidth / iw : c.maxHeight / ih;
+        final w = iw * s, h = ih * s;
+        final ox = (c.maxWidth - w) / 2, oy = (c.maxHeight - h) / 2;
+        final rect = Rect.fromLTWH(ox, oy, w, h);
 
-      Offset pt(int i) => Offset(ox + widget.corners[i * 2] * w, oy + widget.corners[i * 2 + 1] * h);
-      List<Offset> handles() {
-        final p = [for (var i = 0; i < 4; i++) pt(i)];
-        return [...p, for (var i = 0; i < 4; i++) (p[i] + p[(i + 1) % 4]) / 2];
-      }
-
-      void move(Offset pos) {
-        final list = List.of(widget.corners);
-        final target = pos - _grabOffset;
-        double nx(double x) => ((x - ox) / w).clamp(0.0, 1.0);
-        double ny(double y) => ((y - oy) / h).clamp(0.0, 1.0);
-        final d = _drag!;
-        if (d < 4) {
-          list[d * 2] = nx(target.dx);
-          list[d * 2 + 1] = ny(target.dy);
-        } else {
-          final a = d - 4, b = (d - 3) % 4;
-          final mid = (pt(a) + pt(b)) / 2;
-          final delta = target - mid;
-          for (final k in [a, b]) {
-            final p = pt(k) + delta;
-            list[k * 2] = nx(p.dx);
-            list[k * 2 + 1] = ny(p.dy);
-          }
+        Offset pt(int i) => Offset(ox + widget.corners[i * 2] * w, oy + widget.corners[i * 2 + 1] * h);
+        List<Offset> handles() {
+          final p = [for (var i = 0; i < 4; i++) pt(i)];
+          return [...p, for (var i = 0; i < 4; i++) (p[i] + p[(i + 1) % 4]) / 2];
         }
-        widget.onChanged(list);
-      }
 
-      final hs = handles();
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onPanStart: (d) {
-          var best = -1;
-          var bestDist = 46.0;
-          for (var i = 0; i < hs.length; i++) {
-            final dist = (hs[i] - d.localPosition).distance;
-            if (dist < bestDist - (i < 4 ? 6 : 0)) {
-              best = i;
-              bestDist = dist;
+        void move(Offset pos) {
+          final list = List.of(widget.corners);
+          final target = pos - _grabOffset;
+          double nx(double x) => ((x - ox) / w).clamp(0.0, 1.0);
+          double ny(double y) => ((y - oy) / h).clamp(0.0, 1.0);
+          final d = _drag!;
+          if (d < 4) {
+            list[d * 2] = nx(target.dx);
+            list[d * 2 + 1] = ny(target.dy);
+          } else {
+            final a = d - 4, b = (d - 3) % 4;
+            final mid = (pt(a) + pt(b)) / 2;
+            final delta = target - mid;
+            for (final k in [a, b]) {
+              final p = pt(k) + delta;
+              list[k * 2] = nx(p.dx);
+              list[k * 2 + 1] = ny(p.dy);
             }
           }
-          if (best < 0) return;
-          HapticFeedback.selectionClick();
-          setState(() {
-            _drag = best;
-            _grabOffset = d.localPosition - hs[best];
-            _finger = d.localPosition;
-          });
-        },
-        onPanUpdate: (d) {
-          if (_drag == null) return;
-          setState(() => _finger = d.localPosition);
-          move(d.localPosition);
-        },
-        onPanEnd: (_) => setState(() {
-          _drag = null;
-          _finger = null;
-        }),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned.fromRect(
-              rect: rect,
-              child: RawImage(image: widget.image, fit: BoxFit.fill),
-            ),
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _QuadPainter(hs, rect, _drag),
+          widget.onChanged(list);
+        }
+
+        final hs = handles();
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (d) {
+            var best = -1;
+            var bestDist = 46.0;
+            for (var i = 0; i < hs.length; i++) {
+              final dist = (hs[i] - d.localPosition).distance;
+              if (dist < bestDist - (i < 4 ? 6 : 0)) {
+                best = i;
+                bestDist = dist;
+              }
+            }
+            if (best < 0) return;
+            HapticFeedback.selectionClick();
+            setState(() {
+              _drag = best;
+              _grabOffset = d.localPosition - hs[best];
+              _finger = d.localPosition;
+            });
+          },
+          onPanUpdate: (d) {
+            if (_drag == null) return;
+            setState(() => _finger = d.localPosition);
+            move(d.localPosition);
+          },
+          onPanEnd: (_) => setState(() {
+            _drag = null;
+            _finger = null;
+          }),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fromRect(
+                rect: rect,
+                child: RawImage(image: widget.image, fit: BoxFit.fill),
               ),
-            ),
-            if (_drag != null && _drag! < 4 && _finger != null)
-              Positioned(
-                left: (hs[_drag!].dx - 55).clamp(0, c.maxWidth - 110),
-                top: hs[_drag!].dy - 150 < 0 ? hs[_drag!].dy + 40 : hs[_drag!].dy - 150,
-                child: RawMagnifier(
-                  size: const Size(110, 110),
-                  magnificationScale: 2.5,
-                  focalPointOffset: Offset(
-                    hs[_drag!].dx - ((hs[_drag!].dx - 55).clamp(0, c.maxWidth - 110) + 55),
-                    hs[_drag!].dy -
-                        ((hs[_drag!].dy - 150 < 0 ? hs[_drag!].dy + 40 : hs[_drag!].dy - 150) + 55),
-                  ),
-                  decoration: MagnifierDecoration(
-                    shape: const CircleBorder(side: BorderSide(color: Colors.white, width: 3)),
-                    shadows: [BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 12)],
-                  ),
-                  child: const CustomPaint(
-                    size: Size(110, 110),
-                    painter: _CrosshairPainter(),
-                  ),
-                ),
-              ),
-          ],
+              Positioned.fill(child: CustomPaint(painter: _QuadPainter(hs, rect, _drag))),
+              if (_drag != null && _drag! < 4 && _finger != null) _loupe(hs[_drag!], c),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  static const _loupeSize = 130.0;
+
+  /// Lupe in der gegenüberliegenden Ecke der Fläche: Finger links -> Lupe rechts,
+  /// Finger oben -> Lupe unten. So verdeckt weder der Finger die Lupe noch die Lupe die Ecke.
+  Widget _loupe(Offset p, BoxConstraints c) {
+    const m = 12.0, d = _loupeSize;
+    final left = p.dx < c.maxWidth / 2 ? c.maxWidth - d - m : m;
+    final top = p.dy < c.maxHeight / 2 ? c.maxHeight - d - m : m;
+    return Positioned(
+      left: left,
+      top: top,
+      child: RawMagnifier(
+        size: const Size(d, d),
+        magnificationScale: 2.5,
+        focalPointOffset: Offset(p.dx - (left + d / 2), p.dy - (top + d / 2)),
+        decoration: MagnifierDecoration(
+          shape: const CircleBorder(side: BorderSide(color: Colors.white, width: 3)),
+          shadows: [BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 12)],
         ),
-      );
-    });
+        child: const CustomPaint(size: Size(d, d), painter: _CrosshairPainter()),
+      ),
+    );
   }
 }
 
@@ -717,8 +706,10 @@ class _QuadPainter extends CustomPainter {
             ..strokeWidth = 3,
         );
       } else {
-        final r = RRect.fromRectAndRadius(Rect.fromCenter(center: h[i], width: 22, height: 22),
-            const Radius.circular(6));
+        final r = RRect.fromRectAndRadius(
+          Rect.fromCenter(center: h[i], width: 22, height: 22),
+          const Radius.circular(6),
+        );
         canvas.drawRRect(r, Paint()..color = Colors.white.withValues(alpha: on ? 1 : 0.85));
       }
     }

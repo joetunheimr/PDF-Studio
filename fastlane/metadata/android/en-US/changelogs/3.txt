@@ -1,0 +1,1 @@
+The corner magnifier now appears in the opposite corner and is slightly larger.
