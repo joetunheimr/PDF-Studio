@@ -1,0 +1,19 @@
+PDF-Studio combines a document scanner, PDF editor and signature tool in one app. Everything is processed on the device only – no cloud, no account, no ads.
+
+<b>Scan</b>
+<ul>
+<li>Capture multiple pages with the camera, flash/torch, tap to focus</li>
+<li>Import photos from the gallery</li>
+<li>Automatic edge detection, adjust corners and edges with a magnifier, perspective correction</li>
+<li>Filters Original, Color+, Grayscale, Black &amp; white with shadow removal; brightness and contrast</li>
+</ul>
+
+<b>Edit</b>
+<ul>
+<li>Place, move and scale text, date and signatures</li>
+<li>Save signatures for later</li>
+<li>Merge PDFs, scans and photos, reorder pages by dragging</li>
+<li>Rotate, duplicate and delete pages – with undo</li>
+</ul>
+
+Original PDFs stay sharp: text and vector graphics are not rasterized. Files are saved to Download/PDF-Studio; PDFs can be shared and received via "Open with". The user interface is in German.

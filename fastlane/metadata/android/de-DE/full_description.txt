@@ -1,0 +1,19 @@
+PDF-Studio vereint Scanner, PDF-Editor und Unterschrift in einer App. Alles wird ausschließlich auf dem Gerät verarbeitet – keine Cloud, kein Konto, keine Werbung.
+
+<b>Scannen</b>
+<ul>
+<li>Mehrere Seiten mit der Kamera aufnehmen, Blitz/Taschenlampe, Tippen zum Scharfstellen</li>
+<li>Fotos aus der Galerie übernehmen</li>
+<li>Dokumentkanten automatisch erkennen, Ecken und Kanten mit Lupe justieren, perspektivisch entzerren</li>
+<li>Filter Original, Farbe+, Graustufen, Schwarzweiß mit Schattenentfernung; Helligkeit und Kontrast</li>
+</ul>
+
+<b>Bearbeiten</b>
+<ul>
+<li>Text, Datum und Unterschrift frei platzieren, verschieben und skalieren</li>
+<li>Unterschriften für später speichern</li>
+<li>PDFs, Scans und Fotos zusammenfügen, Seiten per Ziehen sortieren</li>
+<li>Seiten drehen, duplizieren, löschen – mit Rückgängig</li>
+</ul>
+
+Original-PDFs bleiben gestochen scharf: Text und Vektorgrafik werden nicht in Bilder umgewandelt. Gespeichert wird in Download/PDF-Studio; PDFs lassen sich teilen und per „Öffnen mit“ empfangen.

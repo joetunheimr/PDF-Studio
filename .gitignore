@@ -1,0 +1,13 @@
+# Nur lokal / nicht veröffentlichen
+graphify-out/
+claude-mem.txt
+downloads/
+version.xml
+*.jks
+*.keystore
+*key.properties
+
+# Build- und IDE-Reste
+dev-app/android/.kotlin/
+.idea/
+*.iml

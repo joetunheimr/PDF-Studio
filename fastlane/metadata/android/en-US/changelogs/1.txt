@@ -1,0 +1,1 @@
+First release: scanning, cropping, filters, text & signature, merging, rotating/deleting/reordering pages.
