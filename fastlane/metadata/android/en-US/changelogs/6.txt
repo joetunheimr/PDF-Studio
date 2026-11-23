@@ -1,0 +1,1 @@
+New: settings (gear) – choose any working folder, app info and notes. The home list shows the working folder, with rename and delete. Corner magnifier in the opposite corner. Fewer permissions.

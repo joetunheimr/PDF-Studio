@@ -203,7 +203,7 @@ class _DocumentScreenState extends State<DocumentScreen> {
               const SizedBox(height: 6),
               Text(
                 '$dl · ${doc.pages.length} Seite(n) · $size\n'
-                'Im Ordner „Download/PDF-Studio“',
+                'Im Ordner „${WorkFolder.current.value.label}“',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 18),

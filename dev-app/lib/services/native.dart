@@ -116,7 +116,7 @@ class NativeBridge {
     }
   }
 
-  /// Kopie in „Download/PDF-Studio“ unter [name]. Liefert den tatsächlich vergebenen Namen.
+  /// Kopie in den Arbeitsordner unter [name]. Liefert den tatsächlich vergebenen Namen.
   static Future<String> saveToDownloads(File file, {String? name}) async {
     try {
       final r = await _ch.invokeMethod<String>('saveToDownloads', {
@@ -129,13 +129,18 @@ class NativeBridge {
     }
   }
 
-  /// Inhalt von „Download/PDF-Studio“, neueste zuerst.
+  /// Inhalt des Arbeitsordners, neueste zuerst.
   static Future<List<SavedPdf>> listSaved() async {
-    final r = await _ch.invokeListMethod<Map<dynamic, dynamic>>('listSaved') ?? const [];
+    final List<Map<dynamic, dynamic>> r;
+    try {
+      r = await _ch.invokeListMethod<Map<dynamic, dynamic>>('listSaved') ?? const [];
+    } on PlatformException catch (e) {
+      throw StateError(e.message ?? e.code);
+    }
     return [
       for (final m in r)
         SavedPdf(
-          id: (m['id'] as num).toInt(),
+          id: m['id'] as String,
           name: m['name'] as String,
           size: (m['size'] as num).toInt(),
           modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num).toInt()),
@@ -187,11 +192,53 @@ class NativeBridge {
   }
 }
 
-/// Eine Datei in „Download/PDF-Studio“ (MediaStore-Eintrag).
+/// Eine Datei im Arbeitsordner; [id] ist ihre content://-URI.
 class SavedPdf {
   const SavedPdf({required this.id, required this.name, required this.size, required this.modified});
-  final int id;
+  final String id;
   final String name;
   final int size;
   final DateTime modified;
+}
+
+/// Arbeitsordner: Standard „Download/PDF-Studio“ oder ein frei gewählter Ordner.
+class WorkFolder {
+  const WorkFolder({required this.custom, required this.label, this.lost = false});
+  final bool custom;
+  final String label;
+
+  /// Ein gewählter Ordner ist nicht mehr erreichbar (Freigabe weg) – es gilt wieder der Standard.
+  final bool lost;
+
+  static const standard = WorkFolder(custom: false, label: 'Download/PDF-Studio');
+
+  static WorkFolder _from(Map<dynamic, dynamic>? m) => m == null
+      ? standard
+      : WorkFolder(custom: m['custom'] == true, label: m['label'] as String, lost: m['lost'] == true);
+
+  /// Aktueller Ordner; Änderungen bekommt die Oberfläche über [current] mit.
+  static final current = ValueNotifier<WorkFolder>(standard);
+
+  static Future<WorkFolder> refresh() async {
+    try {
+      current.value = _from(await NativeBridge._ch.invokeMapMethod('folderInfo'));
+    } catch (_) {}
+    return current.value;
+  }
+
+  /// Öffnet die Ordnerauswahl von Android. null = abgebrochen.
+  static Future<WorkFolder?> pick() async {
+    try {
+      final m = await NativeBridge._ch.invokeMapMethod('pickFolder');
+      if (m == null) return null;
+      return current.value = _from(m);
+    } on PlatformException catch (e) {
+      throw StateError(e.message ?? e.code);
+    }
+  }
+
+  static Future<WorkFolder> reset() async {
+    current.value = _from(await NativeBridge._ch.invokeMapMethod('resetFolder'));
+    return current.value;
+  }
 }

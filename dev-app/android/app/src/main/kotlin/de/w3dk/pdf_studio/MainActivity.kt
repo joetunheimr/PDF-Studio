@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
@@ -41,13 +42,17 @@ import java.util.concurrent.Executors
  * Nativer Teil von PDF-Studio:
  *  - export: baut das PDF mit PDFBox (Original-Seiten bleiben Vektor/Text)
  *  - saveToDownloads: Kopie nach Download/PDF-Studio (MediaStore)
- *  - listSaved / copySaved / renameSaved / deleteSaved: Liste der Startseite = Inhalt von
- *    Download/PDF-Studio (nur Dateien, die diese App angelegt hat – so will es Android)
+ *  - listSaved / copySaved / renameSaved / deleteSaved: Liste der Startseite = Inhalt des Arbeitsordners
+ *    (Standard Download/PDF-Studio per MediaStore – nur eigene Dateien; oder frei gewählt per SAF – alle Dateien)
+ *  - folderInfo / pickFolder / resetFolder: Arbeitsordner wählen (ACTION_OPEN_DOCUMENT_TREE, dauerhafte Freigabe)
  *  - openExternal: PDF in einer Anzeige-App öffnen
  *  - takeIncoming / "incoming": per „Öffnen mit“ oder „Teilen“ empfangene PDFs
  *  - pdfInfo / pdfRender / pdfClose: Anzeige mit dem eingebauten Android-PdfRenderer
  */
 class MainActivity : FlutterActivity() {
+    companion object {
+        private const val REQ_FOLDER = 4711
+    }
     private val channelName = "de.w3dk.pdf_studio/native"
     private val executor = Executors.newSingleThreadExecutor()
     // PdfRenderer ist nicht threadsicher: alle Anzeige-Aufrufe laufen nacheinander auf diesem Thread.
@@ -112,7 +117,7 @@ class MainActivity : FlutterActivity() {
                     }
                     executor.execute {
                         try {
-                            val r = saveToDownloads(File(path), name)
+                            val r = saveToFolder(File(path), name)
                             runOnUiThread { result.success(r) }
                         } catch (e: Throwable) {
                             runOnUiThread { result.error("save_failed", e.message, null) }
@@ -161,21 +166,48 @@ class MainActivity : FlutterActivity() {
                 }
                 "listSaved" -> io(result) { listSaved() }
                 "copySaved" -> {
-                    val id = call.argument<Number>("id")?.toLong()
+                    val id = call.argument<String>("id")
                     val dest = call.argument<String>("dest")
                     if (id == null || dest == null) return@setMethodCallHandler result.error("bad_args", "id/dest fehlt", null)
-                    io(result) { copySaved(id, File(dest)); dest }
+                    io(result) { copySaved(Uri.parse(id), File(dest)); dest }
                 }
                 "renameSaved" -> {
-                    val id = call.argument<Number>("id")?.toLong()
+                    val id = call.argument<String>("id")
                     val name = call.argument<String>("name")
                     if (id == null || name == null) return@setMethodCallHandler result.error("bad_args", "id/name fehlt", null)
-                    io(result) { renameSaved(id, name) }
+                    io(result) { renameSaved(Uri.parse(id), name) }
                 }
                 "deleteSaved" -> {
-                    val id = call.argument<Number>("id")?.toLong()
+                    val id = call.argument<String>("id")
                     if (id == null) return@setMethodCallHandler result.error("bad_args", "id fehlt", null)
-                    io(result) { deleteSaved(id) }
+                    io(result) { deleteSaved(Uri.parse(id)) }
+                }
+                "folderInfo" -> result.success(folderInfo())
+                "pickFolder" -> {
+                    if (pickResult != null) return@setMethodCallHandler result.error("busy", "Auswahl läuft schon", null)
+                    pickResult = result
+                    val i = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+                    )
+                    folderUri()?.let { i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
+                    try {
+                        startActivityForResult(i, REQ_FOLDER)
+                    } catch (e: Exception) {
+                        pickResult = null
+                        result.error("no_picker", "Keine Ordnerauswahl verfügbar", null)
+                    }
+                }
+                "resetFolder" -> {
+                    folderUri()?.let { u ->
+                        try {
+                            contentResolver.releasePersistableUriPermission(
+                                u, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                            )
+                        } catch (_: Exception) {}
+                    }
+                    prefs.edit().remove("folderUri").apply()
+                    result.success(folderInfo())
                 }
                 "openExternal" -> {
                     val path = call.argument<String>("path")
@@ -443,6 +475,86 @@ class MainActivity : FlutterActivity() {
 
     private fun savedUri(id: Long): Uri = ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
 
+    // ---- Arbeitsordner: Standard Download/PDF-Studio (MediaStore) oder ein frei gewählter Ordner (SAF)
+
+    private val prefs get() = getSharedPreferences("pdf_studio", MODE_PRIVATE)
+    private var pickResult: MethodChannel.Result? = null
+
+    /** Gewählter Ordner, nur wenn die dauerhafte Berechtigung noch besteht. */
+    private fun folderUri(): Uri? {
+        val u = prefs.getString("folderUri", null)?.let(Uri::parse) ?: return null
+        val ok = contentResolver.persistedUriPermissions.any { it.uri == u && it.isReadPermission && it.isWritePermission }
+        return if (ok) u else null
+    }
+
+    /** Lesbarer Name, z. B. „Documents/Scans“ oder „SD-Karte: Scans“. */
+    private fun folderLabel(tree: Uri): String {
+        val id = try { DocumentsContract.getTreeDocumentId(tree) } catch (_: Exception) { return tree.toString() }
+        val vol = id.substringBefore(':')
+        val path = id.substringAfter(':', "")
+        val base = path.ifEmpty { "(Hauptverzeichnis)" }
+        return when {
+            vol == "primary" -> base
+            vol == "home" -> "Documents/$path".trimEnd('/')
+            vol.startsWith("raw") || id.startsWith("/") -> id.substringAfterLast("/storage/emulated/0/")
+            else -> "SD-Karte: $base"
+        }
+    }
+
+    private fun folderInfo(): Map<String, Any> {
+        val u = folderUri()
+        return if (u == null) {
+            mapOf("custom" to false, "label" to "Download/PDF-Studio", "lost" to (prefs.getString("folderUri", null) != null))
+        } else {
+            mapOf("custom" to true, "label" to folderLabel(u), "lost" to false)
+        }
+    }
+
+    @Deprecated("Ordnerauswahl über startActivityForResult")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_FOLDER) return
+        val r = pickResult ?: return
+        pickResult = null
+        val tree = data?.data
+        if (resultCode != RESULT_OK || tree == null) return r.success(null)
+        try {
+            contentResolver.takePersistableUriPermission(
+                tree, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+            // alten Ordner freigeben
+            prefs.getString("folderUri", null)?.let(Uri::parse)?.takeIf { it != tree }?.let { old ->
+                try {
+                    contentResolver.releasePersistableUriPermission(
+                        old, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                } catch (_: Exception) {}
+            }
+            prefs.edit().putString("folderUri", tree.toString()).apply()
+            r.success(folderInfo())
+        } catch (e: Exception) {
+            r.error("denied", "Kein Schreibzugriff auf diesen Ordner", null)
+        }
+    }
+
+    private fun treeDocUri(tree: Uri): Uri =
+        DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+
+    /** Speichert in den Arbeitsordner, liefert den tatsächlich vergebenen Namen. */
+    private fun saveToFolder(src: File, name: String): String {
+        val tree = folderUri() ?: return saveToDownloads(src, name)
+        val doc = DocumentsContract.createDocument(contentResolver, treeDocUri(tree), "application/pdf", name)
+            ?: throw IllegalStateException("Datei kann im Ordner nicht angelegt werden")
+        try {
+            contentResolver.openOutputStream(doc, "w")?.use { os -> src.inputStream().use { it.copyTo(os) } }
+                ?: throw IllegalStateException("Schreiben nicht möglich")
+        } catch (e: Exception) {
+            try { DocumentsContract.deleteDocument(contentResolver, doc) } catch (_: Exception) {}
+            throw e
+        }
+        return displayName(doc) ?: name
+    }
+
     /** Läuft auf dem IO-Thread, Ergebnis/Fehler zurück auf den UI-Thread. */
     private fun io(result: MethodChannel.Result, block: () -> Any?) {
         executor.execute {
@@ -451,14 +563,46 @@ class MainActivity : FlutterActivity() {
                 runOnUiThread { result.success(r) }
             } catch (e: RecoverableSecurityException) {
                 runOnUiThread { result.error("denied", "Diese Datei wurde nicht von PDF-Studio angelegt.", null) }
+            } catch (e: SecurityException) {
+                runOnUiThread { result.error("denied", "Kein Zugriff mehr auf den Ordner – bitte in den Einstellungen neu wählen.", null) }
             } catch (e: Throwable) {
                 runOnUiThread { result.error("io_failed", e.message ?: e.toString(), null) }
             }
         }
     }
 
-    /** PDFs in Download/PDF-Studio, neueste zuerst: [{id, name, size, modified(ms)}]. */
+    /** PDFs im Arbeitsordner, neueste zuerst: [{id (URI), name, size, modified(ms)}]. */
     private fun listSaved(): List<Map<String, Any>> {
+        val tree = folderUri()
+        return if (tree == null) listDownloads() else listTree(tree)
+    }
+
+    private fun listTree(tree: Uri): List<Map<String, Any>> {
+        val out = mutableListOf<Map<String, Any>>()
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val proj = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+        )
+        contentResolver.query(children, proj, null, null, null)?.use { c ->
+            while (c.moveToNext()) {
+                val name = c.getString(1) ?: continue
+                val mime = c.getString(4) ?: ""
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) continue
+                if (!name.endsWith(".pdf", ignoreCase = true) && mime != "application/pdf") continue
+                out.add(mapOf(
+                    "id" to DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0)).toString(),
+                    "name" to name,
+                    "size" to (if (c.isNull(2)) 0L else c.getLong(2)),
+                    "modified" to (if (c.isNull(3)) 0L else c.getLong(3)),
+                ))
+            }
+        } ?: throw SecurityException("Ordner nicht lesbar")
+        return out.sortedByDescending { it["modified"] as Long }
+    }
+
+    private fun listDownloads(): List<Map<String, Any>> {
         val out = mutableListOf<Map<String, Any>>()
         val proj = arrayOf(
             MediaStore.Downloads._ID, MediaStore.MediaColumns.DISPLAY_NAME,
@@ -473,7 +617,7 @@ class MainActivity : FlutterActivity() {
                 val name = c.getString(1) ?: continue
                 if (!name.endsWith(".pdf", ignoreCase = true)) continue
                 out.add(mapOf(
-                    "id" to c.getLong(0), "name" to name,
+                    "id" to savedUri(c.getLong(0)).toString(), "name" to name,
                     "size" to (if (c.isNull(2)) 0L else c.getLong(2)),
                     "modified" to (if (c.isNull(3)) 0L else c.getLong(3) * 1000L),
                 ))
@@ -482,22 +626,30 @@ class MainActivity : FlutterActivity() {
         return out
     }
 
-    private fun copySaved(id: Long, dest: File) {
+    private fun copySaved(uri: Uri, dest: File) {
         dest.parentFile?.mkdirs()
-        contentResolver.openInputStream(savedUri(id))?.use { input ->
+        contentResolver.openInputStream(uri)?.use { input ->
             dest.outputStream().use { input.copyTo(it) }
         } ?: throw IllegalStateException("Datei nicht lesbar")
     }
 
+    private fun isDoc(uri: Uri) = DocumentsContract.isDocumentUri(this, uri)
+
     /** Liefert den tatsächlich vergebenen Namen. */
-    private fun renameSaved(id: Long, name: String): String {
-        val uri = savedUri(id)
+    private fun renameSaved(uri: Uri, name: String): String {
+        if (isDoc(uri)) {
+            val n = DocumentsContract.renameDocument(contentResolver, uri, name)
+                ?: throw IllegalStateException("Umbenennen nicht möglich")
+            return displayName(n) ?: name
+        }
         val v = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, name) }
         if (contentResolver.update(uri, v, null, null) < 1) throw IllegalStateException("Umbenennen nicht möglich")
         return displayName(uri) ?: name
     }
 
-    private fun deleteSaved(id: Long): Boolean = contentResolver.delete(savedUri(id), null, null) > 0
+    private fun deleteSaved(uri: Uri): Boolean =
+        if (isDoc(uri)) DocumentsContract.deleteDocument(contentResolver, uri)
+        else contentResolver.delete(uri, null, null) > 0
 
     private fun openExternal(file: File): Boolean {
         return try {

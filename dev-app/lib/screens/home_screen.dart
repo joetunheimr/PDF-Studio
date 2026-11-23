@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/studio_doc.dart';
@@ -11,6 +10,7 @@ import '../services/storage.dart';
 import '../theme.dart';
 import 'document_screen.dart';
 import 'flows.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,6 +21,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<SavedPdf> _recent = [];
+  String? _listError;
   StreamSubscription<List<String>>? _sub;
   bool _busy = false;
 
@@ -42,12 +43,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// Die Liste ist immer der aktuelle Inhalt von „Download/PDF-Studio“.
+  /// Die Liste ist immer der aktuelle Inhalt des Arbeitsordners.
   Future<void> _reload() async {
+    await WorkFolder.refresh();
     try {
       final l = await NativeBridge.listSaved();
-      if (mounted) setState(() => _recent = l);
-    } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _recent = l;
+          _listError = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _recent = [];
+          _listError = '$e';
+        });
+      }
+    }
   }
 
   // Zurück in die App (z. B. nach dem Dateimanager): Liste neu lesen.
@@ -132,37 +146,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await _openDoc(StudioDoc(name: Flows.scanName(), pages: pages)..dirty = true);
       });
 
-  Future<void> _about() async {
-    final info = await PackageInfo.fromPlatform();
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (c) => AlertDialog(
-        icon: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: Image.asset('assets/app_icon.png', width: 72, height: 72),
-        ),
-        title: const Text('PDF-Studio'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Version ${info.version} (Build ${info.buildNumber})'),
-            const SizedBox(height: 12),
-            const Text(
-              'Scannen, zuschneiden, verbessern, unterschreiben, zusammenfügen – '
-              'alles auf dem Gerät, ohne Cloud.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            const Text('© InLAB Consulting LLC',
-                style: TextStyle(fontWeight: FontWeight.w700)),
-            const Text('Open Source', style: TextStyle(fontSize: 12)),
-          ],
-        ),
-        actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('Schließen'))],
-      ),
-    );
+  Future<void> _settings() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    _reload();
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -230,7 +218,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             style: TextStyle(color: scheme.onSurfaceVariant)),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  ValueListenableBuilder<WorkFolder>(
+                    valueListenable: WorkFolder.current,
+                    builder: (_, f, _) => InkWell(
+                      onTap: _settings,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(children: [
+                          Icon(Icons.folder_outlined, size: 16, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(f.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
                 ],
               ),
             ),
@@ -249,7 +256,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     children: [
                       Icon(Icons.inventory_2_outlined, size: 36, color: scheme.outline),
                       const SizedBox(height: 8),
-                      Text('Noch nichts gespeichert.\nHier steht, was im Ordner „Download/PDF-Studio“ liegt.',
+                      Text(_listError != null
+                              ? 'Der Ordner „${WorkFolder.current.value.label}“ ist nicht lesbar.\n$_listError'
+                              : 'Noch nichts gespeichert.\nHier steht, was im Ordner „${WorkFolder.current.value.label}“ liegt.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: scheme.onSurfaceVariant)),
                     ],
@@ -315,9 +324,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           IconButton(
             color: Colors.white,
-            tooltip: 'Info',
-            icon: const Icon(Icons.info_outline),
-            onPressed: _about,
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Einstellungen',
+            onPressed: _settings,
           ),
         ],
       ),
@@ -502,7 +511,7 @@ class _RecentTile extends StatelessWidget {
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('PDF löschen?'),
-        content: Text('„${file.name}“ wird aus dem Ordner „Download/PDF-Studio“ gelöscht. '
+        content: Text('„${file.name}“ wird aus dem Ordner „${WorkFolder.current.value.label}“ gelöscht. '
             'Das lässt sich nicht rückgängig machen.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Abbrechen')),

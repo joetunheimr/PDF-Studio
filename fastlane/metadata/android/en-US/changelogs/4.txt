@@ -1,1 +1,0 @@
-The home list shows the contents of "Download/PDF-Studio". Delete removes the file there; new: Rename. Corner magnifier moves to the opposite corner.
