@@ -1,30 +1,21 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:pdfrx/pdfrx.dart';
 
 import '../models/studio_doc.dart';
+import '../services/native.dart';
 
 /// Hält geöffnete PDF-Dateien und gerenderte Seiten (LRU) vor.
 class RenderCache {
-  static final _docs = <String, Future<PdfDocument>>{};
   static final _images = <String, ui.Image>{};
   static int _bytes = 0;
   static const _maxBytes = 120 * 1024 * 1024;
 
-  static Future<PdfDocument> doc(String path) =>
-      _docs.putIfAbsent(path, () => PdfDocument.openFile(path));
-
-  static Future<void> closeUnused(Set<String> keep) async {
-    final drop = _docs.keys.where((k) => !keep.contains(k)).toList();
-    for (final k in drop) {
-      final f = _docs.remove(k);
-      try {
-        (await f!).dispose();
-      } catch (_) {}
-    }
-  }
+  /// Gibt die im nativen Renderer geöffneten PDFs frei.
+  static Future<void> closeAll() => NativeBridge.pdfClose();
 
   static ui.Image? _get(String key) {
     final im = _images.remove(key);
@@ -60,22 +51,22 @@ class RenderCache {
     if (hit != null) return hit;
     ui.Image? im;
     if (p.source == PageSource.pdf) {
-      final d = await doc(p.path);
-      if (p.pdfIndex >= d.pages.length) return null;
-      final page = d.pages[p.pdfIndex];
-      final w = bucket.toDouble();
-      final h = w * page.height / page.width;
-      final r = await page.render(
-        fullWidth: w,
-        fullHeight: h,
-        backgroundColor: 0xFFFFFFFF,
-        annotationRenderingMode: PdfAnnotationRenderingMode.annotationAndForms,
-      );
-      if (r == null) return null;
+      final (int, int, Uint8List)? r;
       try {
-        im = await r.createImage();
-      } finally {
-        r.dispose();
+        r = await NativeBridge.pdfRender(p.path, p.pdfIndex, bucket);
+      } catch (_) {
+        return null;
+      }
+      if (r == null) return null;
+      final (w, h, px) = r;
+      final done = Completer<ui.Image>();
+      ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, done.complete);
+      im = await done.future;
+      // Inzwischen von einem anderen Aufruf gerendert? Dann den vorhandenen nehmen.
+      final again = _get(key);
+      if (again != null) {
+        im.dispose();
+        return again;
       }
     } else {
       final bytes = await File(p.path).readAsBytes();

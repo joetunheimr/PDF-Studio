@@ -1,0 +1,1 @@
+PDF display now uses Android's built-in PdfRenderer – smaller app. Corner loupe shows a fine crosshair; the handle no longer hides the corner.

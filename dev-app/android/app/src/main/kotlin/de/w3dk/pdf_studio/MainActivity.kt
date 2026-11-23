@@ -2,10 +2,14 @@ package de.w3dk.pdf_studio
 
 import android.content.ContentValues
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
@@ -27,6 +31,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
+import java.nio.ByteBuffer
 import java.util.Calendar
 import java.util.concurrent.Executors
 
@@ -36,10 +41,14 @@ import java.util.concurrent.Executors
  *  - saveToDownloads: Kopie nach Download/PDF-Studio (MediaStore)
  *  - openExternal: PDF in einer Anzeige-App öffnen
  *  - takeIncoming / "incoming": per „Öffnen mit“ oder „Teilen“ empfangene PDFs
+ *  - pdfInfo / pdfRender / pdfClose: Anzeige mit dem eingebauten Android-PdfRenderer
  */
 class MainActivity : FlutterActivity() {
     private val channelName = "de.w3dk.pdf_studio/native"
     private val executor = Executors.newSingleThreadExecutor()
+    // PdfRenderer ist nicht threadsicher: alle Anzeige-Aufrufe laufen nacheinander auf diesem Thread.
+    private val renderExecutor = Executors.newSingleThreadExecutor()
+    private val renderers = LinkedHashMap<String, Pair<ParcelFileDescriptor, PdfRenderer>>(8, 0.75f, true)
     private var channel: MethodChannel? = null
     private val pending = mutableListOf<String>()
     private var pdfBoxReady = false
@@ -106,6 +115,46 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
+                "pdfInfo" -> {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.error("bad_args", "path fehlt", null)
+                        return@setMethodCallHandler
+                    }
+                    renderExecutor.execute {
+                        try {
+                            val sizes = pdfInfo(path)
+                            runOnUiThread { result.success(sizes) }
+                        } catch (e: Throwable) {
+                            closeRenderer(path)
+                            runOnUiThread { result.error("pdf_open_failed", e.message ?: e.javaClass.simpleName, null) }
+                        }
+                    }
+                }
+                "pdfRender" -> {
+                    val path = call.argument<String>("path")
+                    val index = call.argument<Int>("index") ?: 0
+                    val width = call.argument<Int>("width") ?: 800
+                    if (path == null) {
+                        result.error("bad_args", "path fehlt", null)
+                        return@setMethodCallHandler
+                    }
+                    renderExecutor.execute {
+                        try {
+                            val r = pdfRender(path, index, width)
+                            runOnUiThread { result.success(r) }
+                        } catch (e: Throwable) {
+                            runOnUiThread { result.error("pdf_render_failed", e.message ?: e.javaClass.simpleName, null) }
+                        }
+                    }
+                }
+                "pdfClose" -> {
+                    val path = call.argument<String>("path")
+                    renderExecutor.execute {
+                        if (path == null) closeAllRenderers() else closeRenderer(path)
+                    }
+                    result.success(null)
+                }
                 "openExternal" -> {
                     val path = call.argument<String>("path")
                     result.success(path != null && openExternal(File(path)))
@@ -117,6 +166,8 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         executor.shutdown()
+        renderExecutor.execute { closeAllRenderers() }
+        renderExecutor.shutdown()
         super.onDestroy()
     }
 
@@ -163,6 +214,68 @@ class MainActivity : FlutterActivity() {
             }
         } catch (_: Exception) {
             null
+        }
+    }
+
+    // ------------------------------------------------------------------ Anzeige (PdfRenderer)
+
+    private fun renderer(path: String): PdfRenderer {
+        renderers[path]?.let { return it.second }
+        val fd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+        val r = try {
+            PdfRenderer(fd)
+        } catch (e: Throwable) {
+            fd.close()
+            throw e
+        }
+        renderers[path] = fd to r
+        while (renderers.size > 6) {
+            val oldest = renderers.keys.first()
+            closeRenderer(oldest)
+        }
+        return r
+    }
+
+    private fun closeRenderer(path: String) {
+        renderers.remove(path)?.let { (fd, r) ->
+            try { r.close() } catch (_: Throwable) {}
+            try { fd.close() } catch (_: Throwable) {}
+        }
+    }
+
+    private fun closeAllRenderers() {
+        for (k in renderers.keys.toList()) closeRenderer(k)
+    }
+
+    /** Seitengrößen in Punkt (bereits gedreht), als [w0, h0, w1, h1, …]. */
+    private fun pdfInfo(path: String): DoubleArray {
+        val r = renderer(path)
+        val out = DoubleArray(r.pageCount * 2)
+        for (i in 0 until r.pageCount) {
+            r.openPage(i).use { pg ->
+                out[i * 2] = pg.width.toDouble()
+                out[i * 2 + 1] = pg.height.toDouble()
+            }
+        }
+        return out
+    }
+
+    /** Rendert eine Seite auf weißem Grund; liefert Breite, Höhe und RGBA-Pixel. */
+    private fun pdfRender(path: String, index: Int, width: Int): Map<String, Any> {
+        val r = renderer(path)
+        r.openPage(index).use { pg ->
+            val w = width.coerceIn(16, 4096)
+            val h = (w.toDouble() * pg.height / pg.width).toInt().coerceIn(16, 6000)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            try {
+                bmp.eraseColor(Color.WHITE)
+                pg.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                val buf = ByteBuffer.allocate(w * h * 4)
+                bmp.copyPixelsToBuffer(buf) // Speicherreihenfolge R, G, B, A
+                return mapOf("w" to w, "h" to h, "px" to buf.array())
+            } finally {
+                bmp.recycle()
+            }
         }
     }
 

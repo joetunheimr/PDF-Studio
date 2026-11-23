@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:pdfrx/pdfrx.dart';
 
 import 'screens/home_screen.dart';
 import 'services/native.dart';
@@ -9,7 +8,6 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  pdfrxFlutterInitialize();
   await Storage.init();
   NativeBridge.init();
   Storage.cleanWork();

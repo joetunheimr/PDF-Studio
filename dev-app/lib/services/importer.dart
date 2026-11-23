@@ -1,10 +1,9 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:pdfrx/pdfrx.dart';
 
 import '../models/studio_doc.dart';
-import '../widgets/page_render.dart';
+import 'native.dart';
 import 'storage.dart';
 
 class ImportException implements Exception {
@@ -18,23 +17,23 @@ class Importer {
   /// Kopiert das PDF in den Arbeitsordner und liefert alle Seiten.
   static Future<List<PageItem>> pdf(String sourcePath) async {
     final path = await Storage.importCopy(sourcePath);
-    final PdfDocument d;
+    final List<(double, double)> sizes;
     try {
-      d = await RenderCache.doc(path);
+      sizes = await NativeBridge.pdfPageSizes(path);
     } catch (e) {
       throw ImportException(
           'Die Datei lässt sich nicht öffnen (beschädigt oder passwortgeschützt).');
     }
-    if (d.pages.isEmpty) throw ImportException('Das PDF enthält keine Seiten.');
+    if (sizes.isEmpty) throw ImportException('Das PDF enthält keine Seiten.');
     return [
-      for (var i = 0; i < d.pages.length; i++)
+      for (var i = 0; i < sizes.length; i++)
         PageItem(
           id: newId('p'),
           source: PageSource.pdf,
           path: path,
           pdfIndex: i,
-          baseWidth: d.pages[i].width,
-          baseHeight: d.pages[i].height,
+          baseWidth: sizes[i].$1,
+          baseHeight: sizes[i].$2,
         ),
     ];
   }

@@ -38,7 +38,7 @@ class _DocumentScreenState extends State<DocumentScreen> {
 
   @override
   void dispose() {
-    RenderCache.closeUnused(const {});
+    RenderCache.closeAll();
     super.dispose();
   }
 

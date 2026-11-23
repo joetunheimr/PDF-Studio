@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
@@ -34,6 +35,29 @@ class NativeBridge {
     } catch (_) {
       return const [];
     }
+  }
+
+  /// Seitengrößen in Punkt (Drehung der Datei schon berücksichtigt).
+  static Future<List<(double, double)>> pdfPageSizes(String path) async {
+    final r = await _ch.invokeMethod<Float64List>('pdfInfo', {'path': path});
+    if (r == null) return const [];
+    return [for (var i = 0; i + 1 < r.length; i += 2) (r[i], r[i + 1])];
+  }
+
+  /// Rendert eine PDF-Seite auf weißem Grund; Pixel in RGBA.
+  static Future<(int, int, Uint8List)?> pdfRender(
+      String path, int index, int width) async {
+    final r = await _ch.invokeMapMethod<String, Object?>(
+        'pdfRender', {'path': path, 'index': index, 'width': width});
+    if (r == null) return null;
+    return (r['w'] as int, r['h'] as int, r['px'] as Uint8List);
+  }
+
+  /// Schließt geöffnete PDFs im Renderer (ohne Pfad: alle).
+  static Future<void> pdfClose([String? path]) async {
+    try {
+      await _ch.invokeMethod('pdfClose', {'path': path});
+    } catch (_) {}
   }
 
   /// Baut das fertige PDF. Original-PDF-Seiten bleiben dabei Vektor/Text –

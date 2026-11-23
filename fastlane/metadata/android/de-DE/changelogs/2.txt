@@ -1,0 +1,1 @@
+PDF-Anzeige mit dem eingebauten Android-PdfRenderer – die App ist kleiner. Lupe beim Eckenjustieren mit feinem Fadenkreuz, der Greifer verdeckt die Ecke nicht mehr.

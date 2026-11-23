@@ -655,7 +655,7 @@ class _CornerEditorState extends State<CornerEditor> {
                 top: hs[_drag!].dy - 150 < 0 ? hs[_drag!].dy + 40 : hs[_drag!].dy - 150,
                 child: RawMagnifier(
                   size: const Size(110, 110),
-                  magnificationScale: 2.2,
+                  magnificationScale: 2.5,
                   focalPointOffset: Offset(
                     hs[_drag!].dx - ((hs[_drag!].dx - 55).clamp(0, c.maxWidth - 110) + 55),
                     hs[_drag!].dy -
@@ -665,8 +665,9 @@ class _CornerEditorState extends State<CornerEditor> {
                     shape: const CircleBorder(side: BorderSide(color: Colors.white, width: 3)),
                     shadows: [BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 12)],
                   ),
-                  child: const Center(
-                    child: Icon(Icons.add, color: StudioColors.coral, size: 22),
+                  child: const CustomPaint(
+                    size: Size(110, 110),
+                    painter: _CrosshairPainter(),
                   ),
                 ),
               ),
@@ -688,17 +689,23 @@ class _QuadPainter extends CustomPainter {
     final quad = Path()..addPolygon(h.sublist(0, 4), true);
     final outside = Path.combine(PathOperation.difference, Path()..addRect(img), quad);
     canvas.drawPath(outside, Paint()..color = Colors.black.withValues(alpha: 0.55));
+    // Beim Ziehen einer Ecke dünne Linien, damit die Lupe die Papierkante zeigt
+    final cornerDrag = active != null && active! < 4;
     canvas.drawPath(
       quad,
       Paint()
         ..color = StudioColors.coral
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5,
+        ..strokeWidth = cornerDrag ? 1.0 : 2.5,
     );
-    canvas.drawPath(quad, Paint()..color = StudioColors.coral.withValues(alpha: 0.08));
+    if (!cornerDrag) {
+      canvas.drawPath(quad, Paint()..color = StudioColors.coral.withValues(alpha: 0.08));
+    }
     for (var i = 0; i < h.length; i++) {
       final corner = i < 4;
       final on = active == i;
+      // Die gezogene Ecke nicht zeichnen – sonst verdeckt der Greifer sie in der Lupe
+      if (corner && on) continue;
       if (corner) {
         canvas.drawCircle(h[i], on ? 17 : 14, Paint()..color = Colors.white);
         canvas.drawCircle(
@@ -719,4 +726,40 @@ class _QuadPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _QuadPainter old) => true;
+}
+
+/// Feines Fadenkreuz in der Lupe: dünne Linien mit Lücke in der Mitte,
+/// hell umrandet, damit es auf hellem und dunklem Grund sichtbar ist.
+class _CrosshairPainter extends CustomPainter {
+  const _CrosshairPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    const gap = 4.0;
+    const len = 16.0;
+    final segs = [
+      (c + const Offset(-gap - len, 0), c + const Offset(-gap, 0)),
+      (c + const Offset(gap, 0), c + const Offset(gap + len, 0)),
+      (c + const Offset(0, -gap - len), c + const Offset(0, -gap)),
+      (c + const Offset(0, gap), c + const Offset(0, gap + len)),
+    ];
+    final halo = Paint()
+      ..color = Colors.white.withValues(alpha: 0.85)
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+    final line = Paint()
+      ..color = StudioColors.coral
+      ..strokeWidth = 1.2
+      ..strokeCap = StrokeCap.round;
+    for (final (a, b) in segs) {
+      canvas.drawLine(a, b, halo);
+    }
+    for (final (a, b) in segs) {
+      canvas.drawLine(a, b, line);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CrosshairPainter old) => false;
 }
